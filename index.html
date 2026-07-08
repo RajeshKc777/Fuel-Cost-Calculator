@@ -277,14 +277,9 @@ function placeMarker(coord, type) {
   else map.setView([coord.lat, coord.lon], 13);
 }
 
-function showRouteOnMap(coordsA, coordsB, routeCoords) {
+function showMarkersOnMap(coordsA, coordsB) {
   placeMarker(coordsA, 'from');
   placeMarker(coordsB, 'to');
-  if (routeLayer) map.removeLayer(routeLayer);
-  if (routeCoords && routeCoords.length) {
-    routeLayer = L.polyline(routeCoords, { color: '#14432B', weight: 4 }).addTo(map);
-    map.fitBounds(routeLayer.getBounds(), { padding: [30, 30] });
-  }
 }
 
 // ---- ORS config ----
@@ -311,18 +306,84 @@ async function geocode(place) {
   return { lat, lon };
 }
 
-async function routeDistanceKm(a, b) {
+// Fetch direct route + alternatives in one call
+async function fetchAllRoutes(a, b) {
   const res = await fetch('https://api.openrouteservice.org/v2/directions/driving-car/geojson', {
     method: 'POST',
     headers: { 'Authorization': ORS_KEY, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ coordinates: [[a.lon, a.lat], [b.lon, b.lat]] })
+    body: JSON.stringify({
+      coordinates: [[a.lon, a.lat], [b.lon, b.lat]],
+      alternative_routes: { target_count: 3, share_factor: 0.6 }
+    })
   });
   if (!res.ok) throw new Error('Routing service failed');
   const data = await res.json();
   if (!data.features || !data.features.length) throw new Error('No driving route found');
-  const coords = data.features[0].geometry.coordinates.map(c => [c[1], c[0]]);
-  const km = data.features[0].properties.summary.distance / 1000;
-  return { km, coords };
+  return data.features.map(f => ({
+    km: f.properties.summary.distance / 1000,
+    coords: f.geometry.coordinates.map(c => [c[1], c[0]])
+  }));
+}
+
+// Route via a perpendicular waypoint offset
+async function fetchViaWaypoint(a, b, offsetKm) {
+  const midLat = (a.lat + b.lat) / 2;
+  const midLon = (a.lon + b.lon) / 2;
+  const dLat = b.lat - a.lat, dLon = b.lon - a.lon;
+  const len = Math.sqrt(dLat * dLat + dLon * dLon) || 1;
+  const degPerKm = 1 / 111;
+  const via = { lon: midLon + (-dLat / len) * offsetKm * degPerKm, lat: midLat + (dLon / len) * offsetKm * degPerKm };
+  const res = await fetch('https://api.openrouteservice.org/v2/directions/driving-car/geojson', {
+    method: 'POST',
+    headers: { 'Authorization': ORS_KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ coordinates: [[a.lon, a.lat], [via.lon, via.lat], [b.lon, b.lat]] })
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  if (!data.features || !data.features.length) return null;
+  return {
+    km: data.features[0].properties.summary.distance / 1000,
+    coords: data.features[0].geometry.coordinates.map(c => [c[1], c[0]])
+  };
+}
+
+// Pick best route closest to targetKm, never exceeding it by more than 5%
+function pickBestRoute(routes, targetKm) {
+  const ceiling = targetKm * 1.05;
+  const candidates = routes.filter(r => r.km <= ceiling);
+  if (!candidates.length) return routes.reduce((a, b) => Math.abs(a.km - targetKm) < Math.abs(b.km - targetKm) ? a : b);
+  return candidates.reduce((a, b) => Math.abs(a.km - targetKm) < Math.abs(b.km - targetKm) ? a : b);
+}
+
+// State shared between initial lookup and margin-change re-run
+let lastRouteState = null; // { a, b, directRoute, allRoutes }
+let directLayer = null, marginLayer = null;
+
+async function resolveMarginRoute(directKm, marginPct) {
+  const { a, b, directRoute, allRoutes } = lastRouteState;
+  const targetKm = directKm * (1 + marginPct / 100);
+
+  // Try alternatives first (within ±5%)
+  let best = null;
+  const within = allRoutes.filter(r => Math.abs(r.km - targetKm) / targetKm <= 0.05);
+  if (within.length) {
+    best = pickBestRoute(within, targetKm);
+  } else {
+    // Fallback: try via-waypoints
+    const offsets = [0.5, 1, 1.5, 2];
+    const viaResults = (await Promise.all(offsets.map(o => fetchViaWaypoint(a, b, o).catch(() => null)))).filter(Boolean);
+    const candidates = [...allRoutes, ...viaResults];
+    best = pickBestRoute(candidates, targetKm);
+  }
+
+  // Draw direct (gray) + margin route (green)
+  if (directLayer) map.removeLayer(directLayer);
+  if (marginLayer) map.removeLayer(marginLayer);
+  directLayer = L.polyline(directRoute.coords, { color: '#aaa', weight: 3, dashArray: '5,5' }).addTo(map);
+  marginLayer = L.polyline(best.coords,        { color: '#2e7d32', weight: 4 }).addTo(map);
+  map.fitBounds(marginLayer.getBounds(), { padding: [30, 30] });
+
+  return best.km;
 }
 
 // ---- ORS autocomplete suggestions ----
@@ -379,10 +440,7 @@ async function tryAutoRoute() {
   setStatus('Calculating route...');
   $('ticket').classList.remove('show');
   try {
-    const { km, coords } = await routeDistanceKm(coordFrom, coordTo);
-    showRouteOnMap(coordFrom, coordTo, coords);
-    computeAndShowTicket($('from').value, $('to').value, $('via').value.trim(), km, 'Road distance via OpenRouteService — verify against odometer');
-    setStatus('Distance found. Adjust if needed, then save.');
+    await runFullLookup(coordFrom, coordTo, $('from').value, $('to').value, $('via').value.trim());
   } catch(e) {
     setStatus('Route failed: ' + e.message, true);
   } finally {
@@ -390,10 +448,20 @@ async function tryAutoRoute() {
   }
 }
 
-function computeAndShowTicket(from, to, via, actualKm, note) {
+async function runFullLookup(a, b, fromLabel, toLabel, viaLabel) {
+  const allRoutes = await fetchAllRoutes(a, b);
+  const directRoute = allRoutes[0];
+  lastRouteState = { a, b, directRoute, allRoutes };
+  showMarkersOnMap(a, b);
+  const marginPct = parseFloat($('margin').value);
+  const claimedKm = await resolveMarginRoute(directRoute.km, marginPct);
+  computeAndShowTicket(fromLabel, toLabel, viaLabel, directRoute.km, claimedKm, 'Real alternate route via ORS — direct shown in gray, claimed in green');
+  setStatus('Distance found. Adjust if needed, then save.');
+}
+
+function computeAndShowTicket(from, to, via, actualKm, claimedKm, note) {
   const marginPct = parseFloat($('margin').value);
   const rate = parseFloat($('rate').value) || 0;
-  const claimedKm = actualKm * (1 + marginPct / 100);
   const fuelCost = claimedKm * rate;
   currentCalc = { from, to, via, actualKm, marginPct, rate, claimedKm, fuelCost, note };
   $('ticket-route').textContent = from + '  →  ' + to + (via ? '  (' + via + ')' : '');
@@ -418,21 +486,32 @@ $('calc-btn').addEventListener('click', async () => {
   try {
     const a = coordFrom || await geocode(from);
     const b = coordTo   || await geocode(to);
-    const { km, coords } = await routeDistanceKm(a, b);
-    showRouteOnMap(a, b, coords);
-    computeAndShowTicket(from, to, via, km, 'Road distance via OpenRouteService — verify against odometer');
-    setStatus('Distance found. Adjust if needed, then save.');
+    await runFullLookup(a, b, from, to, via);
   } catch (e) {
     setStatus('Lookup failed: ' + e.message + '. Enter km manually and recalculate.', true);
-    computeAndShowTicket(from, to, via, 0, 'Manual entry');
+    computeAndShowTicket(from, to, via, 0, 0, 'Manual entry');
   } finally {
     btn.disabled = false; btn.textContent = 'Look up distance & show on map';
   }
 });
 
+// Re-run margin selection when dropdown changes (no new API call for routes)
+$('margin').addEventListener('change', async () => {
+  if (!lastRouteState || !currentCalc) return;
+  const marginPct = parseFloat($('margin').value);
+  try {
+    const claimedKm = await resolveMarginRoute(lastRouteState.directRoute.km, marginPct);
+    computeAndShowTicket(currentCalc.from, currentCalc.to, currentCalc.via, lastRouteState.directRoute.km, claimedKm, 'Real alternate route via ORS — direct shown in gray, claimed in green');
+  } catch(e) {
+    setStatus('Margin re-route failed: ' + e.message, true);
+  }
+});
+
 $('recalc-btn').addEventListener('click', () => {
   if (!currentCalc) return;
-  computeAndShowTicket(currentCalc.from, currentCalc.to, currentCalc.via, parseFloat($('actual-edit').value) || 0, currentCalc.note);
+  const actualKm = parseFloat($('actual-edit').value) || 0;
+  const claimedKm = actualKm * (1 + currentCalc.marginPct / 100);
+  computeAndShowTicket(currentCalc.from, currentCalc.to, currentCalc.via, actualKm, claimedKm, currentCalc.note);
 });
 
 // ---- Firestore (per-user) ----
