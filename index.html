@@ -37,9 +37,7 @@
   .user-bar strong { color: var(--lime); }
   .user-bar button { background: transparent; border: 1px solid var(--lime-dim); color: var(--lime-dim); padding: 4px 10px; border-radius: 3px; font-size: 11px; cursor: pointer; }
 
-  /* Two-column layout on desktop */
-  .main-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-  @media (max-width: 700px) { .main-grid { grid-template-columns: 1fr; } }
+  .main-grid { display: block; }
 
   .card { background: #fff; border: 1px solid var(--line); border-radius: 6px; padding: 16px; margin-bottom: 14px; }
   .card h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--deep); margin: 0 0 12px; border-left: 3px solid var(--lime); padding-left: 8px; }
@@ -58,9 +56,8 @@
   .btn.ghost { background: transparent; color: var(--red); border: none; padding: 4px 8px; font-size: 11px; font-weight: 600; width: auto; margin: 0; }
   .btn.sm { padding: 8px 14px; font-size: 12px; width: auto; margin: 0; }
 
-  /* Map */
-  #map { height: 320px; border-radius: 6px; border: 1px solid var(--line); }
-  .map-hint { font-size: 11px; color: #8a938a; margin-top: 6px; }
+  /* Map inside trip card */
+  #trip-map { height: 300px; width: 100%; border-radius: 4px; border: 1px solid var(--line); margin-bottom: 10px; }
 
   /* Ticket */
   .ticket { display: none; margin-top: 14px; border: 1.5px dashed var(--deep); border-radius: 6px; padding: 14px 16px; background: linear-gradient(180deg,#fff 0%,var(--lime-dim) 260%); }
@@ -170,6 +167,7 @@
               <input type="text" id="purpose" placeholder="e.g. School visit">
             </div>
           </div>
+          <div id="trip-map"></div>
           <button class="btn" id="calc-btn">Look up distance &amp; show on map</button>
           <div class="status" id="status"></div>
 
@@ -194,18 +192,7 @@
         </div>
       </div>
 
-      <!-- Right: map -->
-      <div>
-        <div class="card">
-          <h2>Route Map</h2>
-          <div id="map"></div>
-          <div class="map-hint">Map updates automatically when you look up a route. You can also click the map to place markers manually and measure distance.</div>
-          <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
-            <button class="btn secondary sm" id="map-clear-btn">Clear markers</button>
-            <span id="map-dist" style="font-size:12px; color:var(--deep); align-self:center;"></span>
-          </div>
-        </div>
-      </div>
+
     </div>
 
     <!-- Summary -->
@@ -271,53 +258,32 @@ $('switch-btn').addEventListener('click', () => {
 });
 
 // ---- Map setup ----
-let map, routeLayer, markerA, markerB, manualMarkers = [];
+let map, routeLayer, markerA, markerB;
+
+const iconFrom = L.divIcon({ className: '', html: '<div style="width:14px;height:14px;background:#2e7d32;border:2px solid #fff;border-radius:50%;box-shadow:0 1px 4px rgba(0,0,0,0.4)"></div>', iconSize: [14,14], iconAnchor: [7,7] });
+const iconTo   = L.divIcon({ className: '', html: '<div style="width:14px;height:14px;background:#A3402F;border:2px solid #fff;border-radius:50%;box-shadow:0 1px 4px rgba(0,0,0,0.4)"></div>', iconSize: [14,14], iconAnchor: [7,7] });
 
 function initMap() {
-  map = L.map('map').setView([28.2, 83.9], 9);
+  map = L.map('trip-map').setView([28.2096, 83.9856], 13);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '© OpenStreetMap contributors', maxZoom: 18
   }).addTo(map);
-
-  map.on('click', e => {
-    if (manualMarkers.length >= 2) return;
-    const m = L.marker(e.latlng, { draggable: true }).addTo(map);
-    manualMarkers.push(m);
-    m.on('dragend', updateManualLine);
-    updateManualLine();
-  });
 }
 
-function updateManualLine() {
-  if (manualMarkers.length < 2) return;
-  const a = manualMarkers[0].getLatLng();
-  const b = manualMarkers[1].getLatLng();
-  const dist = (map.distance(a, b) / 1000).toFixed(2);
-  $('map-dist').textContent = `Manual straight-line: ${dist} km`;
-  if (window._manualLine) map.removeLayer(window._manualLine);
-  window._manualLine = L.polyline([a, b], { color: '#A3402F', dashArray: '6,4', weight: 2 }).addTo(map);
+function placeMarker(coord, type) {
+  if (type === 'from') { if (markerA) map.removeLayer(markerA); markerA = L.marker([coord.lat, coord.lon], { icon: iconFrom }).addTo(map).bindPopup('From'); }
+  else                 { if (markerB) map.removeLayer(markerB); markerB = L.marker([coord.lat, coord.lon], { icon: iconTo   }).addTo(map).bindPopup('To');   }
+  if (markerA && markerB) map.fitBounds([[markerA.getLatLng().lat, markerA.getLatLng().lng],[markerB.getLatLng().lat, markerB.getLatLng().lng]], { padding: [40,40] });
+  else map.setView([coord.lat, coord.lon], 13);
 }
-
-$('map-clear-btn').addEventListener('click', () => {
-  manualMarkers.forEach(m => map.removeLayer(m));
-  manualMarkers = [];
-  if (window._manualLine) { map.removeLayer(window._manualLine); window._manualLine = null; }
-  $('map-dist').textContent = '';
-});
 
 function showRouteOnMap(coordsA, coordsB, routeCoords) {
-  if (markerA) map.removeLayer(markerA);
-  if (markerB) map.removeLayer(markerB);
+  placeMarker(coordsA, 'from');
+  placeMarker(coordsB, 'to');
   if (routeLayer) map.removeLayer(routeLayer);
-
-  markerA = L.marker([coordsA.lat, coordsA.lon]).addTo(map).bindPopup('From').openPopup();
-  markerB = L.marker([coordsB.lat, coordsB.lon]).addTo(map).bindPopup('To');
-
   if (routeCoords && routeCoords.length) {
     routeLayer = L.polyline(routeCoords, { color: '#14432B', weight: 4 }).addTo(map);
     map.fitBounds(routeLayer.getBounds(), { padding: [30, 30] });
-  } else {
-    map.fitBounds([[coordsA.lat, coordsA.lon], [coordsB.lat, coordsB.lon]], { padding: [40, 40] });
   }
 }
 
@@ -402,8 +368,8 @@ function setupAutocomplete(inputId, onSelect) {
 }
 
 let coordFrom = null, coordTo = null;
-setupAutocomplete('from', r => { coordFrom = r; tryAutoRoute(); });
-setupAutocomplete('to',   r => { coordTo   = r; tryAutoRoute(); });
+setupAutocomplete('from', r => { coordFrom = r; placeMarker(r, 'from'); tryAutoRoute(); });
+setupAutocomplete('to',   r => { coordTo   = r; placeMarker(r, 'to');   tryAutoRoute(); });
 $('from').addEventListener('input', () => { coordFrom = null; });
 $('to').addEventListener('input',   () => { coordTo   = null; });
 
@@ -571,7 +537,7 @@ $('export-btn').addEventListener('click', () => {
   a.href = URL.createObjectURL(blob); a.download = `fuel_log_${currentUser}.csv`; a.click();
 });
 
-// Init map after DOM ready
+// Init map immediately (always visible)
 initMap();
 </script>
 </body>
