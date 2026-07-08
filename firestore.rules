@@ -1,0 +1,14 @@
+// Paste these into: Firebase Console -> Firestore Database -> Rules -> publish
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /fuel_trips/{tripId} {
+      allow read, write: if true;
+    }
+  }
+}
+
+// Note: this allows anyone with the site link to read/write the trip log,
+// since there's no login step. Fine for a small trusted office team, but
+// don't store anything sensitive beyond trip routes, names, and costs.

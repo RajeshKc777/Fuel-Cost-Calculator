@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fuel Claim Distance Tracker — DigiSchool Gandaki</title>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<style>
+  :root {
+    --ink: #142016;
+    --paper: #F6F5EF;
+    --deep: #14432B;
+    --deep2: #0D2E1C;
+    --lime: #A6D608;
+    --lime-dim: #DDEAA3;
+    --line: #cfd4c4;
+    --red: #A3402F;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    color: var(--ink);
+    background: var(--paper);
+    margin: 0;
+    padding: 28px 16px 60px;
+  }
+  #root { max-width: 900px; margin: 0 auto; }
+  .mono { font-family: 'Consolas', 'SF Mono', Menlo, monospace; }
+
+  .header {
+    display: flex; align-items: center; justify-content: space-between;
+    border-bottom: 2px solid var(--deep); padding-bottom: 14px; margin-bottom: 22px; flex-wrap: wrap; gap: 10px;
+  }
+  .header h1 { font-size: 21px; letter-spacing: 0.02em; margin: 0; color: var(--deep2); }
+  .header .sub { font-size: 12px; color: #5b6558; margin-top: 3px; }
+  .badge {
+    background: var(--deep); color: var(--lime); font-size: 11px; font-weight: 600;
+    padding: 6px 12px; border-radius: 3px; letter-spacing: 0.06em; text-transform: uppercase;
+  }
+
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 6px; padding: 20px; margin-bottom: 18px; }
+  .card h2 {
+    font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--deep);
+    margin: 0 0 14px 0; border-left: 3px solid var(--lime); padding-left: 8px;
+  }
+
+  .row { display: flex; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+  .field { flex: 1 1 200px; display: flex; flex-direction: column; gap: 5px; }
+  .field label { font-size: 11.5px; color: #565f52; font-weight: 600; }
+  .field input, .field select {
+    padding: 9px 10px; border: 1px solid var(--line); border-radius: 4px;
+    font-size: 13.5px; color: var(--ink); background: #fdfdfb;
+  }
+  .field input:focus, .field select:focus { outline: none; border-color: var(--deep); }
+
+  .btn {
+    background: var(--deep); color: #fff; border: none; padding: 10px 18px; border-radius: 4px;
+    font-size: 13px; font-weight: 600; cursor: pointer; letter-spacing: 0.02em;
+  }
+  .btn:hover { background: var(--deep2); }
+  .btn:disabled { background: #9aa39a; cursor: wait; }
+  .btn.secondary { background: transparent; color: var(--deep); border: 1px solid var(--deep); }
+  .btn.secondary:hover { background: var(--lime-dim); }
+  .btn.ghost { background: transparent; color: var(--red); border: none; padding: 4px 8px; font-size: 11.5px; font-weight: 600; }
+
+  .ticket {
+    display: none; margin-top: 16px; border: 1.5px dashed var(--deep); border-radius: 6px;
+    padding: 16px 18px; background: linear-gradient(180deg, #fff 0%, var(--lime-dim) 260%);
+  }
+  .ticket.show { display: block; }
+  .ticket-route { font-size: 15px; font-weight: 700; color: var(--deep2); margin-bottom: 2px; }
+  .ticket-note { font-size: 11.5px; color: #6b7565; margin-bottom: 12px; }
+  .ticket-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .ticket-stat .k { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; color: #6b7565; }
+  .ticket-stat .v { font-size: 16px; font-weight: 700; color: var(--deep2); margin-top: 2px; }
+  .ticket-editrow { margin-top: 12px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .ticket-editrow label { font-size: 11.5px; color: #565f52; }
+  .ticket-editrow input { width: 90px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 4px; font-size: 13px; }
+
+  .status { font-size: 12px; color: #6b7565; margin-top: 8px; min-height: 16px; }
+  .status.err { color: var(--red); }
+
+  .summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 18px; }
+  .sum-box { background: var(--deep); color: #fff; border-radius: 6px; padding: 14px 16px; }
+  .sum-box .k { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--lime-dim); }
+  .sum-box .v { font-size: 20px; font-weight: 700; margin-top: 4px; color: var(--lime); }
+
+  table.log { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  table.log th {
+    text-align: left; padding: 8px; background: var(--deep); color: #fff;
+    font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  table.log th:first-child { border-radius: 4px 0 0 0; }
+  table.log th:last-child { border-radius: 0 4px 0 0; }
+  table.log td { padding: 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  table.log tr:hover td { background: #fbfaf4; }
+  .empty { text-align: center; color: #8a938a; padding: 24px; font-size: 12.5px; }
+
+  .toolbar { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; align-items: center; }
+
+  .setup-warning {
+    background: #fff3e0; border: 1px solid #f0b429; color: #6b4a00;
+    padding: 14px 16px; border-radius: 6px; font-size: 13px; margin-bottom: 18px; line-height: 1.5;
+  }
+  .setup-warning code { background: #fce9c9; padding: 1px 5px; border-radius: 3px; }
+</style>
+</head>
+<body>
+<div id="root">
+  <div class="header">
+    <div>
+      <h1>Fuel Claim Distance Tracker</h1>
+      <div class="sub">Digi School Gandaki — shared trip log for fuel expense claims</div>
+    </div>
+    <div class="badge">Rs 10.95 / km</div>
+  </div>
+
+  <div id="setup-warning" class="setup-warning" style="display:none;"></div>
+
+  <div class="card">
+    <h2>New Trip</h2>
+    <div class="row">
+      <div class="field">
+        <label>Your name</label>
+        <input type="text" id="employee" placeholder="e.g. Rajesh">
+      </div>
+      <div class="field">
+        <label>Date</label>
+        <input type="date" id="date">
+      </div>
+      <div class="field">
+        <label>Margin</label>
+        <select id="margin">
+          <option value="10">10%</option>
+          <option value="15">15%</option>
+          <option value="20">20%</option>
+          <option value="25" selected>25%</option>
+          <option value="30">30%</option>
+          <option value="35">35%</option>
+          <option value="40">40%</option>
+          <option value="45">45%</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Fuel rate (Rs/km)</label>
+        <input type="number" id="rate" value="10.95" step="0.01">
+      </div>
+    </div>
+    <div class="row">
+      <div class="field">
+        <label>From</label>
+        <input type="text" id="from" placeholder="e.g. Birauta, Pokhara">
+      </div>
+      <div class="field">
+        <label>To</label>
+        <input type="text" id="to" placeholder="e.g. Prativa Secondary School">
+      </div>
+    </div>
+    <div class="row">
+      <div class="field">
+        <label>Route / via (optional)</label>
+        <input type="text" id="via" placeholder="e.g. via Prithvi Highway">
+      </div>
+      <div class="field">
+        <label>Purpose (optional)</label>
+        <input type="text" id="purpose" placeholder="e.g. School observation visit">
+      </div>
+    </div>
+
+    <button class="btn" id="calc-btn">Look up distance</button>
+    <div class="status" id="status"></div>
+
+    <div class="ticket" id="ticket">
+      <div class="ticket-route" id="ticket-route"></div>
+      <div class="ticket-note" id="ticket-note"></div>
+      <div class="ticket-grid">
+        <div class="ticket-stat"><div class="k">Actual km</div><div class="v mono" id="actual-km">--</div></div>
+        <div class="ticket-stat"><div class="k">Margin</div><div class="v mono" id="margin-view">--</div></div>
+        <div class="ticket-stat"><div class="k">Claimed km</div><div class="v mono" id="claimed-km">--</div></div>
+        <div class="ticket-stat"><div class="k">Fuel amount</div><div class="v mono" id="fuel-cost">--</div></div>
+      </div>
+      <div class="ticket-editrow">
+        <label>Correct actual km if needed:</label>
+        <input type="number" id="actual-edit" step="0.1">
+        <button class="btn secondary" id="recalc-btn" style="padding:6px 12px;font-size:12px;">Recalculate</button>
+      </div>
+      <div style="margin-top:14px;">
+        <button class="btn" id="save-btn">Save to log</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="summary" id="summary"></div>
+
+  <div class="card">
+    <div class="toolbar">
+      <select id="employee-filter" style="padding:7px 10px; border:1px solid var(--line); border-radius:4px; font-size:12.5px;">
+        <option value="">All employees</option>
+      </select>
+      <button class="btn secondary" id="export-btn">Export CSV</button>
+    </div>
+    <h2>Trip Log</h2>
+    <div id="log-wrap"></div>
+  </div>
+</div>
+
+<script>
+// ====================== CONFIGURE THIS ======================
+// Create a free project at https://console.firebase.google.com, enable
+// Firestore Database (test mode is fine to start), then paste your web
+// app config below (Project settings -> General -> Your apps -> Web app).
+const firebaseConfig = {
+  apiKey: "AIzaSyDqM0kcJiSgBBxXH4YKmoCdfI1WeVBrElU",
+  authDomain: "fuel-cost-database.firebaseapp.com",
+  projectId: "fuel-cost-database",
+  storageBucket: "fuel-cost-database.firebasestorage.app",
+  messagingSenderId: "337566387070",
+  appId: "1:337566387070:web:59f5442ca6ecadfad4812f"
+};
+// ==============================================================
+
+let db = null;
+if (firebaseConfig.apiKey !== "YOUR_API_KEY") {
+  firebase.initializeApp(firebaseConfig);
+  db = firebase.firestore();
+} else {
+  document.getElementById('setup-warning').style.display = 'block';
+  document.getElementById('setup-warning').innerHTML =
+    'Database is not configured yet. Open <code>index.html</code>, fill in <code>firebaseConfig</code> ' +
+    'near the top of the script, and follow the setup guide. Until then, ' +
+    'this page will run in local-only preview mode (data won\'t be shared or saved after you close the tab).';
+}
+
+const $ = (id) => document.getElementById(id);
+$('date').value = new Date().toISOString().slice(0, 10);
+
+let currentCalc = null;
+let trips = [];
+let localFallback = []; // used only if Supabase isn't configured
+
+function fmt(n, d) {
+  if (n === null || n === undefined || isNaN(n)) return '--';
+  return Number(n).toFixed(d === undefined ? 1 : d);
+}
+
+function setStatus(msg, isErr) {
+  const el = $('status');
+  el.textContent = msg;
+  el.className = 'status' + (isErr ? ' err' : '');
+}
+
+// ---------- Free distance lookup: Nominatim (geocoding) + OSRM (routing) ----------
+async function geocode(place) {
+  const q = encodeURIComponent(place.trim() + (/nepal/i.test(place) ? '' : ', Nepal'));
+  const url = `https://nominatim.openstreetmap.org/search?format=json&q=${q}&limit=1`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('Geocoding failed for "' + place + '"');
+  const data = await res.json();
+  if (!data.length) throw new Error('Could not find location: "' + place + '"');
+  return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon), display: data[0].display_name };
+}
+
+async function routeDistanceKm(a, b) {
+  const url = `https://router.project-osrm.org/route/v1/driving/${a.lon},${a.lat};${b.lon},${b.lat}?overview=false`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('Routing service failed');
+  const data = await res.json();
+  if (!data.routes || !data.routes.length) throw new Error('No driving route found between these points');
+  return data.routes[0].distance / 1000;
+}
+
+async function lookupDistance(from, to) {
+  const [a, b] = await Promise.all([geocode(from), geocode(to)]);
+  const km = await routeDistanceKm(a, b);
+  return { distance_km: km, note: 'Road distance via OpenStreetMap routing — verify against odometer' };
+}
+
+// ---------- Ticket calculation ----------
+function computeAndShowTicket(from, to, via, actualKm, note) {
+  const marginPct = parseFloat($('margin').value);
+  const rate = parseFloat($('rate').value) || 0;
+  const claimedKm = actualKm * (1 + marginPct / 100);
+  const fuelCost = claimedKm * rate;
+
+  currentCalc = { from, to, via, actualKm, marginPct, rate, claimedKm, fuelCost, note };
+
+  $('ticket-route').textContent = from + '  ->  ' + to + (via ? '  (' + via + ')' : '');
+  $('ticket-note').textContent = note || '';
+  $('actual-km').textContent = fmt(actualKm) + ' km';
+  $('margin-view').textContent = '+' + marginPct + '%';
+  $('claimed-km').textContent = fmt(claimedKm) + ' km';
+  $('fuel-cost').textContent = 'Rs ' + fmt(fuelCost, 2);
+  $('actual-edit').value = actualKm;
+  $('ticket').classList.add('show');
+}
+
+$('calc-btn').addEventListener('click', async () => {
+  const from = $('from').value.trim();
+  const to = $('to').value.trim();
+  const via = $('via').value.trim();
+
+  if (!from || !to) { setStatus('Enter both From and To locations.', true); return; }
+
+  const btn = $('calc-btn');
+  btn.disabled = true;
+  btn.textContent = 'Looking up...';
+  setStatus('Searching for road distance...');
+  $('ticket').classList.remove('show');
+
+  try {
+    const result = await lookupDistance(from, to);
+    computeAndShowTicket(from, to, via, result.distance_km, result.note);
+    setStatus('Distance found. Check it against your odometer and adjust below if needed, then save.');
+  } catch (e) {
+    setStatus('Lookup failed (' + e.message + '). Enter the distance manually below and click Recalculate.', true);
+    computeAndShowTicket(from, to, via, 0, 'Manual entry — lookup unavailable');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Look up distance';
+  }
+});
+
+$('recalc-btn').addEventListener('click', () => {
+  if (!currentCalc) return;
+  const actualKm = parseFloat($('actual-edit').value) || 0;
+  computeAndShowTicket(currentCalc.from, currentCalc.to, currentCalc.via, actualKm, currentCalc.note);
+});
+
+// ---------- Persistence (Firebase Firestore, with local-only fallback) ----------
+async function loadTrips() {
+  if (db) {
+    try {
+      const snap = await db.collection('fuel_trips').orderBy('date', 'desc').get();
+      trips = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    } catch (e) {
+      setStatus('Could not load trips: ' + e.message, true);
+      trips = [];
+    }
+  } else {
+    trips = localFallback;
+  }
+  renderLog();
+}
+
+async function saveTripToStore(trip) {
+  if (db) {
+    try {
+      await db.collection('fuel_trips').add(trip);
+      return true;
+    } catch (e) {
+      setStatus('Could not save: ' + e.message, true);
+      return false;
+    }
+  } else {
+    trip.id = 'local_' + Date.now();
+    localFallback.unshift(trip);
+    return true;
+  }
+}
+
+async function deleteTripFromStore(id) {
+  if (db) {
+    try {
+      await db.collection('fuel_trips').doc(id).delete();
+    } catch (e) {
+      setStatus('Could not delete: ' + e.message, true);
+      return;
+    }
+  } else {
+    localFallback = localFallback.filter(t => t.id !== id);
+  }
+  await loadTrips();
+}
+
+$('save-btn').addEventListener('click', async () => {
+  if (!currentCalc) return;
+  const employee = $('employee').value.trim();
+  if (!employee) { setStatus('Enter your name before saving.', true); return; }
+
+  const trip = {
+    date: $('date').value, employee, from: currentCalc.from, to: currentCalc.to, via: currentCalc.via,
+    purpose: $('purpose').value.trim(), actualKm: currentCalc.actualKm, marginPct: currentCalc.marginPct,
+    claimedKm: currentCalc.claimedKm, rate: currentCalc.rate, fuelCost: currentCalc.fuelCost
+  };
+
+  const ok = await saveTripToStore(trip);
+  if (ok) {
+    await loadTrips();
+    setStatus('Trip saved to log.');
+    $('ticket').classList.remove('show');
+    currentCalc = null;
+    $('from').value = ''; $('to').value = ''; $('via').value = ''; $('purpose').value = '';
+  }
+});
+
+// ---------- Rendering ----------
+function renderLog() {
+  const wrap = $('log-wrap');
+  const summaryEl = $('summary');
+  const filterVal = $('employee-filter').value;
+
+  // populate employee filter options
+  const names = Array.from(new Set(trips.map(t => t.employee).filter(Boolean))).sort();
+  const currentFilterVal = filterVal;
+  $('employee-filter').innerHTML = '<option value="">All employees</option>' +
+    names.map(n => `<option value="${n}">${n}</option>`).join('');
+  $('employee-filter').value = currentFilterVal;
+
+  const visible = filterVal ? trips.filter(t => t.employee === filterVal) : trips;
+
+  if (!visible.length) {
+    wrap.innerHTML = '<div class="empty">No trips logged yet. Calculate a trip above and save it.</div>';
+    summaryEl.innerHTML = '';
+    return;
+  }
+
+  let totalActual = 0, totalClaimed = 0, totalCost = 0;
+  let rows = '';
+  visible.forEach(t => {
+    totalActual += Number(t.actualKm) || 0;
+    totalClaimed += Number(t.claimedKm) || 0;
+    totalCost += Number(t.fuelCost) || 0;
+    rows += '<tr>' +
+      '<td>' + t.date + '</td>' +
+      '<td>' + (t.employee || '-') + '</td>' +
+      '<td>' + t.from + ' &rarr; ' + t.to + (t.via ? '<br><span style="color:#8a938a;">' + t.via + '</span>' : '') + '</td>' +
+      '<td>' + (t.purpose || '-') + '</td>' +
+      '<td class="mono">' + fmt(t.actualKm) + '</td>' +
+      '<td class="mono">+' + t.marginPct + '%</td>' +
+      '<td class="mono">' + fmt(t.claimedKm) + '</td>' +
+      '<td class="mono">Rs ' + fmt(t.fuelCost, 2) + '</td>' +
+      '<td><button class="btn ghost" data-id="' + t.id + '">Delete</button></td>' +
+      '</tr>';
+  });
+
+  wrap.innerHTML = '<table class="log"><thead><tr>' +
+    '<th>Date</th><th>Employee</th><th>Route</th><th>Purpose</th><th>Actual km</th><th>Margin</th><th>Claimed km</th><th>Fuel amount</th><th></th>' +
+    '</tr></thead><tbody>' + rows + '</tbody></table>';
+
+  wrap.querySelectorAll('button[data-id]').forEach(b => {
+    b.addEventListener('click', () => deleteTripFromStore(b.getAttribute('data-id')));
+  });
+
+  summaryEl.innerHTML =
+    '<div class="sum-box"><div class="k">Total actual distance</div><div class="v">' + fmt(totalActual) + ' km</div></div>' +
+    '<div class="sum-box"><div class="k">Total claimed distance</div><div class="v">' + fmt(totalClaimed) + ' km</div></div>' +
+    '<div class="sum-box"><div class="k">Total fuel claim</div><div class="v">Rs ' + fmt(totalCost, 2) + '</div></div>';
+}
+
+$('employee-filter').addEventListener('change', renderLog);
+
+$('export-btn').addEventListener('click', () => {
+  const filterVal = $('employee-filter').value;
+  const visible = filterVal ? trips.filter(t => t.employee === filterVal) : trips;
+  if (!visible.length) return;
+  const header = ['Date', 'Employee', 'From', 'To', 'Via', 'Purpose', 'Actual km', 'Margin %', 'Claimed km', 'Rate (Rs/km)', 'Fuel amount (Rs)'];
+  const lines = [header.join(',')];
+  visible.forEach(t => {
+    lines.push([
+      t.date, t.employee || '', t.from, t.to, t.via || '', t.purpose || '',
+      fmt(t.actualKm), t.marginPct, fmt(t.claimedKm), t.rate, fmt(t.fuelCost, 2)
+    ].map(v => '"' + String(v).replace(/"/g, '""') + '"').join(','));
+  });
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'fuel_claim_log.csv'; a.click();
+  URL.revokeObjectURL(url);
+});
+
+loadTrips();
+</script>
+</body>
+</html>
