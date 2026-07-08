@@ -321,6 +321,9 @@ function showRouteOnMap(coordsA, coordsB, routeCoords) {
   }
 }
 
+// ---- ORS config ----
+const ORS_KEY = 'eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImRjYTE1YzUzNmJjZDQ4YzA4OGE1OTcwMWMxOWE0YjAxIiwiaCI6Im11cm11cjY0In0=';
+
 // ---- Distance lookup ----
 function fmt(n, d) {
   if (n === null || n === undefined || isNaN(n)) return '--';
@@ -333,21 +336,92 @@ function setStatus(msg, isErr) {
 }
 
 async function geocode(place) {
-  const q = encodeURIComponent(place.trim() + (/nepal/i.test(place) ? '' : ', Nepal'));
-  const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${q}&limit=1`);
+  const url = `https://api.openrouteservice.org/geocode/search?api_key=${ORS_KEY}&text=${encodeURIComponent(place)}&boundary.country=NP&size=1`;
+  const res = await fetch(url);
   if (!res.ok) throw new Error('Geocoding failed for "' + place + '"');
   const data = await res.json();
-  if (!data.length) throw new Error('Could not find: "' + place + '"');
-  return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon) };
+  if (!data.features || !data.features.length) throw new Error('Could not find: "' + place + '"');
+  const [lon, lat] = data.features[0].geometry.coordinates;
+  return { lat, lon };
 }
 
 async function routeDistanceKm(a, b) {
-  const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${a.lon},${a.lat};${b.lon},${b.lat}?overview=full&geometries=geojson`);
+  const res = await fetch('https://api.openrouteservice.org/v2/directions/driving-car/geojson', {
+    method: 'POST',
+    headers: { 'Authorization': ORS_KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ coordinates: [[a.lon, a.lat], [b.lon, b.lat]] })
+  });
   if (!res.ok) throw new Error('Routing service failed');
   const data = await res.json();
-  if (!data.routes || !data.routes.length) throw new Error('No driving route found');
-  const coords = data.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
-  return { km: data.routes[0].distance / 1000, coords };
+  if (!data.features || !data.features.length) throw new Error('No driving route found');
+  const coords = data.features[0].geometry.coordinates.map(c => [c[1], c[0]]);
+  const km = data.features[0].properties.summary.distance / 1000;
+  return { km, coords };
+}
+
+// ---- ORS autocomplete suggestions ----
+let suggestTimers = {};
+async function fetchSuggestions(text) {
+  if (text.length < 3) return [];
+  const url = `https://api.openrouteservice.org/geocode/autocomplete?api_key=${ORS_KEY}&text=${encodeURIComponent(text)}&boundary.country=NP&size=5`;
+  const res = await fetch(url);
+  if (!res.ok) return [];
+  const data = await res.json();
+  return (data.features || []).map(f => ({ label: f.properties.label, lat: f.geometry.coordinates[1], lon: f.geometry.coordinates[0] }));
+}
+
+function setupAutocomplete(inputId, onSelect) {
+  const input = $(inputId);
+  const list = document.createElement('div');
+  list.style.cssText = 'position:absolute;z-index:9999;background:#fff;border:1px solid var(--line);border-radius:4px;width:100%;max-height:180px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,0.1);';
+  input.parentElement.style.position = 'relative';
+  input.parentElement.appendChild(list);
+
+  input.addEventListener('input', () => {
+    clearTimeout(suggestTimers[inputId]);
+    suggestTimers[inputId] = setTimeout(async () => {
+      const results = await fetchSuggestions(input.value);
+      list.innerHTML = '';
+      results.forEach(r => {
+        const item = document.createElement('div');
+        item.textContent = r.label;
+        item.style.cssText = 'padding:8px 10px;font-size:12px;cursor:pointer;border-bottom:1px solid var(--line);';
+        item.addEventListener('mousedown', e => {
+          e.preventDefault();
+          input.value = r.label;
+          list.innerHTML = '';
+          onSelect(r);
+        });
+        item.addEventListener('mouseover', () => item.style.background = 'var(--lime-dim)');
+        item.addEventListener('mouseout', () => item.style.background = '');
+        list.appendChild(item);
+      });
+    }, 300);
+  });
+  input.addEventListener('blur', () => setTimeout(() => list.innerHTML = '', 200));
+}
+
+let coordFrom = null, coordTo = null;
+setupAutocomplete('from', r => { coordFrom = r; tryAutoRoute(); });
+setupAutocomplete('to',   r => { coordTo   = r; tryAutoRoute(); });
+$('from').addEventListener('input', () => { coordFrom = null; });
+$('to').addEventListener('input',   () => { coordTo   = null; });
+
+async function tryAutoRoute() {
+  if (!coordFrom || !coordTo) return;
+  $('calc-btn').disabled = true; $('calc-btn').textContent = 'Looking up...';
+  setStatus('Calculating route...');
+  $('ticket').classList.remove('show');
+  try {
+    const { km, coords } = await routeDistanceKm(coordFrom, coordTo);
+    showRouteOnMap(coordFrom, coordTo, coords);
+    computeAndShowTicket($('from').value, $('to').value, $('via').value.trim(), km, 'Road distance via OpenRouteService — verify against odometer');
+    setStatus('Distance found. Adjust if needed, then save.');
+  } catch(e) {
+    setStatus('Route failed: ' + e.message, true);
+  } finally {
+    $('calc-btn').disabled = false; $('calc-btn').textContent = 'Look up distance & show on map';
+  }
 }
 
 function computeAndShowTicket(from, to, via, actualKm, note) {
@@ -376,10 +450,11 @@ $('calc-btn').addEventListener('click', async () => {
   setStatus('Searching for road distance...');
   $('ticket').classList.remove('show');
   try {
-    const [a, b] = await Promise.all([geocode(from), geocode(to)]);
+    const a = coordFrom || await geocode(from);
+    const b = coordTo   || await geocode(to);
     const { km, coords } = await routeDistanceKm(a, b);
     showRouteOnMap(a, b, coords);
-    computeAndShowTicket(from, to, via, km, 'Road distance via OpenStreetMap — verify against odometer');
+    computeAndShowTicket(from, to, via, km, 'Road distance via OpenRouteService — verify against odometer');
     setStatus('Distance found. Adjust if needed, then save.');
   } catch (e) {
     setStatus('Lookup failed: ' + e.message + '. Enter km manually and recalculate.', true);
