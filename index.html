@@ -8,6 +8,8 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.css"/>
+<script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.js"></script>
 <style>
   :root {
     --ink: #142016; --paper: #F6F5EF; --deep: #14432B; --deep2: #0D2E1C;
@@ -58,6 +60,8 @@
 
   /* Map inside trip card */
   #trip-map { height: 300px; width: 100%; border-radius: 4px; border: 1px solid var(--line); margin-bottom: 10px; }
+  /* Hide LRM's built-in itinerary panel and waypoint inputs */
+  .leaflet-routing-container { display: none !important; }
 
   /* Ticket */
   .ticket { display: none; margin-top: 14px; border: 1.5px dashed var(--deep); border-radius: 6px; padding: 14px 16px; background: linear-gradient(180deg,#fff 0%,var(--lime-dim) 260%); }
@@ -258,10 +262,41 @@ $('switch-btn').addEventListener('click', () => {
 });
 
 // ---- Map setup ----
-let map, routeLayer, markerA, markerB;
+let map, directLayer, lrmControl;
 
 const iconFrom = L.divIcon({ className: '', html: '<div style="width:14px;height:14px;background:#2e7d32;border:2px solid #fff;border-radius:50%;box-shadow:0 1px 4px rgba(0,0,0,0.4)"></div>', iconSize: [14,14], iconAnchor: [7,7] });
 const iconTo   = L.divIcon({ className: '', html: '<div style="width:14px;height:14px;background:#A3402F;border:2px solid #fff;border-radius:50%;box-shadow:0 1px 4px rgba(0,0,0,0.4)"></div>', iconSize: [14,14], iconAnchor: [7,7] });
+
+// ORS router for LRM
+function orsRouter() {
+  return {
+    route: function(waypoints, callback) {
+      const coords = waypoints.map(wp => [wp.latLng.lng, wp.latLng.lat]);
+      fetch('https://api.openrouteservice.org/v2/directions/driving-car/geojson', {
+        method: 'POST',
+        headers: { 'Authorization': ORS_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ coordinates: coords })
+      })
+      .then(r => r.json())
+      .then(data => {
+        if (!data.features || !data.features.length) { callback(new Error('No route')); return; }
+        const f = data.features[0];
+        const km = f.properties.summary.distance / 1000;
+        const latlngs = f.geometry.coordinates.map(c => L.latLng(c[1], c[0]));
+        callback(null, [{
+          name: '',
+          summary: { totalDistance: km * 1000, totalTime: f.properties.summary.duration },
+          coordinates: latlngs,
+          waypoints: waypoints,
+          inputWaypoints: waypoints,
+          instructions: []
+        }]);
+      })
+      .catch(e => callback(e));
+    },
+    abort: function() {}
+  };
+}
 
 function initMap() {
   map = L.map('trip-map').setView([28.2096, 83.9856], 13);
@@ -270,16 +305,41 @@ function initMap() {
   }).addTo(map);
 }
 
-function placeMarker(coord, type) {
-  if (type === 'from') { if (markerA) map.removeLayer(markerA); markerA = L.marker([coord.lat, coord.lon], { icon: iconFrom }).addTo(map).bindPopup('From'); }
-  else                 { if (markerB) map.removeLayer(markerB); markerB = L.marker([coord.lat, coord.lon], { icon: iconTo   }).addTo(map).bindPopup('To');   }
-  if (markerA && markerB) map.fitBounds([[markerA.getLatLng().lat, markerA.getLatLng().lng],[markerB.getLatLng().lat, markerB.getLatLng().lng]], { padding: [40,40] });
-  else map.setView([coord.lat, coord.lon], 13);
-}
+function placeMarker() {} // markers now handled by LRM waypoint icons
 
 function showMarkersOnMap(coordsA, coordsB) {
-  placeMarker(coordsA, 'from');
-  placeMarker(coordsB, 'to');
+  // just pan — LRM control will place its own draggable markers
+  map.fitBounds([[coordsA.lat, coordsA.lon],[coordsB.lat, coordsB.lon]], { padding: [40,40] });
+}
+
+function setupLRM(a, b, initialCoords) {
+  if (lrmControl) map.removeControl(lrmControl);
+
+  lrmControl = L.Routing.control({
+    waypoints: [ L.latLng(a.lat, a.lon), L.latLng(b.lat, b.lon) ],
+    router: orsRouter(),
+    draggableWaypoints: true,
+    addWaypoints: true,
+    routeWhileDragging: false,
+    fitSelectedRoutes: true,
+    show: false,
+    lineOptions: { styles: [{ color: '#2e7d32', weight: 4 }] },
+    createMarker: function(i, wp) {
+      return L.marker(wp.latLng, { icon: i === 0 ? iconFrom : iconTo, draggable: true });
+    }
+  }).addTo(map);
+
+  lrmControl.on('routesfound', function(e) {
+    const km = e.routes[0].summary.totalDistance / 1000;
+    if (!currentCalc) return;
+    const rate = parseFloat($('rate').value) || 0;
+    const fuelCost = km * rate;
+    currentCalc.claimedKm = km;
+    currentCalc.fuelCost = fuelCost;
+    $('claimed-km').textContent = fmt(km) + ' km';
+    $('fuel-cost').textContent = 'Rs ' + fmt(fuelCost, 2);
+    setStatus('Route updated: ' + fmt(km) + ' km. Save when ready.');
+  });
 }
 
 // ---- ORS config ----
@@ -356,32 +416,32 @@ function pickBestRoute(routes, targetKm) {
 }
 
 // State shared between initial lookup and margin-change re-run
-let lastRouteState = null; // { a, b, directRoute, allRoutes }
-let directLayer = null, marginLayer = null;
+let lastRouteState = null;
 
 async function resolveMarginRoute(directKm, marginPct) {
   const { a, b, directRoute, allRoutes } = lastRouteState;
   const targetKm = directKm * (1 + marginPct / 100);
 
   // Try alternatives first (within ±5%)
-  let best = null;
+  let best;
   const within = allRoutes.filter(r => Math.abs(r.km - targetKm) / targetKm <= 0.05);
   if (within.length) {
     best = pickBestRoute(within, targetKm);
   } else {
-    // Fallback: try via-waypoints
     const offsets = [0.5, 1, 1.5, 2];
     const viaResults = (await Promise.all(offsets.map(o => fetchViaWaypoint(a, b, o).catch(() => null)))).filter(Boolean);
-    const candidates = [...allRoutes, ...viaResults];
-    best = pickBestRoute(candidates, targetKm);
+    best = pickBestRoute([...allRoutes, ...viaResults], targetKm);
   }
 
-  // Draw direct (gray) + margin route (green)
+  // Draw direct route in gray (static, undraggable)
   if (directLayer) map.removeLayer(directLayer);
-  if (marginLayer) map.removeLayer(marginLayer);
-  directLayer = L.polyline(directRoute.coords, { color: '#aaa', weight: 3, dashArray: '5,5' }).addTo(map);
-  marginLayer = L.polyline(best.coords,        { color: '#2e7d32', weight: 4 }).addTo(map);
-  map.fitBounds(marginLayer.getBounds(), { padding: [30, 30] });
+  directLayer = L.polyline(directRoute.coords, { color: '#aaa', weight: 3, dashArray: '5,5', interactive: false }).addTo(map);
+
+  // Set up LRM with best route waypoints as starting point (draggable green)
+  // Use midpoint via-waypoints from best.coords to seed the LRM route
+  const mid = best.coords[Math.floor(best.coords.length / 2)];
+  const viaWp = best.km !== directRoute.km ? [L.latLng(mid[0], mid[1])] : [];
+  setupLRM(a, b, viaWp);
 
   return best.km;
 }
