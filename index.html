@@ -26,13 +26,33 @@
   .header .sub { font-size: 11px; color: #5b6558; margin-top: 2px; }
   .badge { background: var(--deep); color: var(--lime); font-size: 11px; font-weight: 600; padding: 5px 10px; border-radius: 3px; letter-spacing: 0.06em; text-transform: uppercase; }
 
-  /* Name gate */
-  #name-gate { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 32px 24px; max-width: 400px; margin: 60px auto; text-align: center; }
-  #name-gate h2 { color: var(--deep2); margin: 0 0 8px; font-size: 18px; }
-  #name-gate p { color: #6b7565; font-size: 13px; margin: 0 0 20px; }
-  #name-gate input { width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 4px; font-size: 15px; margin-bottom: 12px; }
-  #name-gate input:focus { outline: none; border-color: var(--deep); }
-  #name-gate .gate-err { color: var(--red); font-size: 12px; margin: -8px 0 10px; display: none; }
+  /* Auth gate */
+  #auth-gate { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 32px 24px; max-width: 400px; margin: 60px auto; text-align: center; }
+  #auth-gate h2 { color: var(--deep2); margin: 0 0 8px; font-size: 18px; }
+  #auth-gate p { color: #6b7565; font-size: 13px; margin: 0 0 16px; }
+  #auth-gate input { width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 4px; font-size: 15px; margin-bottom: 12px; display: block; }
+  #auth-gate input:focus { outline: none; border-color: var(--deep); }
+  #auth-gate select { width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 4px; font-size: 15px; margin-bottom: 12px; display: none; background: #fdfdfb; color: var(--ink); }
+  #auth-gate select:focus { outline: none; border-color: var(--deep); }
+  .gate-err { color: var(--red); font-size: 12px; margin: -8px 0 10px; display: none; }
+  .gate-toggle { font-size: 12px; color: #6b7565; margin-top: 14px; }
+  .gate-toggle a { color: var(--deep); font-weight: 600; cursor: pointer; text-decoration: underline; }
+  /* Modal */
+  .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 1000; align-items: center; justify-content: center; }
+  .modal-overlay.open { display: flex; }
+  .modal { background: #fff; border-radius: 8px; padding: 28px 24px; width: 340px; max-width: 95vw; text-align: center; box-shadow: 0 8px 32px rgba(0,0,0,0.18); }
+  .modal h3 { margin: 0 0 18px; color: var(--deep2); font-size: 16px; }
+  .modal input { width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 4px; font-size: 14px; margin-bottom: 10px; display: block; }
+  .modal input:focus { outline: none; border-color: var(--deep); }
+  .modal .modal-err { color: var(--red); font-size: 12px; margin: -4px 0 8px; display: none; }
+  .modal .modal-actions { display: flex; gap: 8px; margin-top: 4px; }
+  /* Admin panel */
+  #admin-panel { display: none; max-width: 800px; margin: 0 auto; }
+  .admin-bar { background: var(--deep2); color: #fff; border-radius: 6px; padding: 10px 14px; margin-bottom: 14px; display: flex; justify-content: space-between; align-items: center; font-size: 13px; }
+  .admin-bar strong { color: var(--lime); }
+  .admin-bar button { background: transparent; border: 1px solid var(--lime-dim); color: var(--lime-dim); padding: 4px 10px; border-radius: 3px; font-size: 11px; cursor: pointer; }
+  .btn.warn { background: #b45309; }
+  .btn.warn:hover { background: #92400e; }
 
   /* Main layout */
   #app { display: none; }
@@ -109,13 +129,55 @@
     <div class="badge">Rs 10.95 / km</div>
   </div>
 
-  <!-- Name gate -->
-  <div id="name-gate">
+  <!-- Auth gate -->
+  <div id="auth-gate">
     <h2>Who are you?</h2>
-    <p>Enter your name to view and manage your own trips only.</p>
-    <input type="text" id="name-input" placeholder="e.g. Rajesh" autocomplete="name">
-    <p class="gate-err" id="name-err">This name is already taken, please choose another.</p>
-    <button class="btn" id="name-btn">Continue</button>
+    <p id="gate-sub">Enter your name to get started.</p>
+    <input type="text" id="auth-username" placeholder="Your name" autocomplete="name">
+    <select id="auth-select"><option value="">-- select your name --</option></select>
+    <p class="gate-err" id="auth-err"></p>
+    <button class="btn" id="auth-btn">Continue</button>
+    <p class="gate-toggle">Old user? <a id="gate-toggle-link">Click here</a></p>
+    <p class="gate-toggle">Admin? <a id="admin-toggle-link">Click here</a></p>
+  </div>
+
+  <!-- Admin login modal -->
+  <div class="modal-overlay" id="admin-modal">
+    <div class="modal">
+      <h3>Admin Login</h3>
+      <input type="text" id="admin-email-input" placeholder="Admin email" autocomplete="off">
+      <input type="password" id="admin-pass-input" placeholder="Password" autocomplete="off">
+      <p class="modal-err" id="admin-modal-err"></p>
+      <div class="modal-actions">
+        <button class="btn secondary" id="admin-modal-cancel" style="flex:1">Cancel</button>
+        <button class="btn" id="admin-modal-submit" style="flex:1">Login</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit name modal -->
+  <div class="modal-overlay" id="edit-modal">
+    <div class="modal">
+      <h3>Edit Username</h3>
+      <input type="text" id="edit-name-input" placeholder="New name">
+      <p class="modal-err" id="edit-modal-err"></p>
+      <div class="modal-actions">
+        <button class="btn secondary" id="edit-modal-cancel" style="flex:1">Cancel</button>
+        <button class="btn" id="edit-modal-submit" style="flex:1">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Admin panel -->
+  <div id="admin-panel">
+    <div class="admin-bar">
+      <span>Logged in as <strong>Admin</strong></span>
+      <button id="admin-logout-btn">Logout</button>
+    </div>
+    <div class="card">
+      <h2>All Users</h2>
+      <div class="table-wrap" id="admin-user-wrap"></div>
+    </div>
   </div>
 
   <!-- Main app -->
@@ -231,49 +293,217 @@ const db = firebase.firestore();
 const $ = id => document.getElementById(id);
 $('date').value = new Date().toISOString().slice(0, 10);
 
-// ---- User isolation ----
+// ---- Auth ----
+const ADMIN_USER = 'admin@gmail.com', ADMIN_PASS = 'admin123';
 let currentUser = localStorage.getItem('fuelUser') || '';
+let isAdmin = localStorage.getItem('fuelAdmin') === '1';
 let trips = [];
 let currentCalc = null;
+let gateMode = 'new'; // 'new' | 'old'
 
 function showApp() {
-  $('name-gate').style.display = 'none';
+  $('auth-gate').style.display = 'none';
   $('app').style.display = 'block';
   $('user-label').textContent = currentUser;
   loadTrips();
 }
 
-if (currentUser) showApp();
+function showAdminPanel() {
+  $('auth-gate').style.display = 'none';
+  $('admin-panel').style.display = 'block';
+  loadAdminUsers();
+}
 
-$('name-btn').addEventListener('click', async () => {
-  const name = $('name-input').value.trim();
-  if (!name) return;
-  const errEl = $('name-err');
-  errEl.style.display = 'none';
-  // Check if name already used by another user in Firestore (case-insensitive)
-  try {
-    const snap = await db.collection('fuel_trips').get();
-    const usedNames = new Set(snap.docs.map(d => (d.data().employee || '').trim().toLowerCase()));
-    if (usedNames.has(name.toLowerCase())) {
-      errEl.style.display = 'block';
-      return;
-    }
-  } catch(e) { /* network error — allow through */ }
-  currentUser = name;
-  localStorage.setItem('fuelUser', name);
+if (isAdmin) showAdminPanel();
+else if (currentUser) showApp();
+
+// Toggle between new-user (text input) and old-user (dropdown)
+$('gate-toggle-link').addEventListener('click', async () => {
+  if (gateMode === 'new') {
+    gateMode = 'old';
+    $('auth-username').style.display = 'none';
+    $('gate-sub').textContent = 'Select your name to continue.';
+    $('gate-toggle-link').textContent = 'New user? Click here';
+    $('auth-btn').textContent = 'Continue';
+    // Populate dropdown from existing fuel_trips employees
+    const sel = $('auth-select');
+    sel.style.display = 'block';
+    sel.innerHTML = '<option value="">-- select your name --</option>';
+    try {
+      const snap = await db.collection('fuel_trips').get();
+      const names = [...new Set(snap.docs.map(d => d.data().employee).filter(Boolean))].sort();
+      names.forEach(n => { const o = document.createElement('option'); o.value = n; o.textContent = n; sel.appendChild(o); });
+    } catch(e) { /* ignore */ }
+  } else {
+    gateMode = 'new';
+    $('auth-username').style.display = 'block';
+    $('auth-select').style.display = 'none';
+    $('gate-sub').textContent = 'Enter your name to get started.';
+    $('gate-toggle-link').textContent = 'Old user? Click here';
+  }
+  $('auth-err').style.display = 'none';
+});
+
+$('auth-btn').addEventListener('click', async () => {
+  $('auth-err').style.display = 'none';
+  const username = gateMode === 'old'
+    ? $('auth-select').value
+    : $('auth-username').value.trim();
+  if (!username) { $('auth-err').textContent = gateMode === 'old' ? 'Please select your name.' : 'Enter your name.'; $('auth-err').style.display = 'block'; return; }
+
+  // Admin shortcut
+  if (username === ADMIN_USER) { $('auth-err').textContent = 'Use admin credentials.'; $('auth-err').style.display = 'block'; return; }
+
+  if (gateMode === 'new') {
+    // Check name not already taken
+    try {
+      const snap = await db.collection('fuel_trips').get();
+      const used = new Set(snap.docs.map(d => (d.data().employee || '').toLowerCase()));
+      if (used.has(username.toLowerCase())) {
+        $('auth-err').textContent = 'This name is already taken. Are you an old user?';
+        $('auth-err').style.display = 'block';
+        return;
+      }
+    } catch(e) { /* allow through on network error */ }
+  }
+
+  currentUser = username;
+  localStorage.setItem('fuelUser', username);
   showApp();
 });
-$('name-input').addEventListener('keydown', e => { if (e.key === 'Enter') $('name-btn').click(); });
-$('name-input').addEventListener('input', () => { $('name-err').style.display = 'none'; });
+
+$('auth-username').addEventListener('keydown', e => { if (e.key === 'Enter') $('auth-btn').click(); });
+$('auth-username').addEventListener('input', () => { $('auth-err').style.display = 'none'; });
+
+// Admin modal
+$('admin-toggle-link').addEventListener('click', () => {
+  $('admin-modal').classList.add('open');
+  $('admin-email-input').value = ''; $('admin-pass-input').value = '';
+  $('admin-modal-err').style.display = 'none';
+  setTimeout(() => $('admin-email-input').focus(), 50);
+});
+$('admin-modal-cancel').addEventListener('click', () => $('admin-modal').classList.remove('open'));
+$('admin-modal').addEventListener('click', e => { if (e.target === $('admin-modal')) $('admin-modal').classList.remove('open'); });
+function submitAdminLogin() {
+  const u = $('admin-email-input').value.trim();
+  const p = $('admin-pass-input').value;
+  if (u === ADMIN_USER && p === ADMIN_PASS) {
+    $('admin-modal').classList.remove('open');
+    localStorage.setItem('fuelAdmin', '1');
+    localStorage.removeItem('fuelUser');
+    isAdmin = true;
+    showAdminPanel();
+  } else {
+    $('admin-modal-err').textContent = 'Invalid credentials.';
+    $('admin-modal-err').style.display = 'block';
+  }
+}
+$('admin-modal-submit').addEventListener('click', submitAdminLogin);
+$('admin-pass-input').addEventListener('keydown', e => { if (e.key === 'Enter') submitAdminLogin(); });
 
 $('switch-btn').addEventListener('click', () => {
   localStorage.removeItem('fuelUser');
   currentUser = '';
   trips = [];
   $('app').style.display = 'none';
-  $('name-gate').style.display = 'block';
-  $('name-input').value = '';
+  $('auth-gate').style.display = 'block';
+  $('auth-username').value = '';
+  gateMode = 'new';
+  $('auth-username').style.display = 'block';
+  $('auth-select').style.display = 'none';
+  $('gate-sub').textContent = 'Enter your name to get started.';
+  $('gate-toggle-link').textContent = 'Old user? Click here';
 });
+
+// ---- Admin ----
+$('admin-logout-btn').addEventListener('click', () => {
+  localStorage.removeItem('fuelAdmin');
+  isAdmin = false;
+  $('admin-panel').style.display = 'none';
+  $('auth-gate').style.display = 'block';
+  $('auth-username').value = '';
+});
+
+async function loadAdminUsers() {
+  const wrap = $('admin-user-wrap');
+  wrap.innerHTML = '<div class="empty">Loading...</div>';
+  try {
+    const snap = await db.collection('fuel_trips').get();
+    const tripMap = {};
+    snap.docs.forEach(d => {
+      const emp = d.data().employee || '';
+      if (!tripMap[emp]) tripMap[emp] = [];
+      tripMap[emp].push(d.id);
+    });
+    const names = Object.keys(tripMap).sort();
+    if (!names.length) { wrap.innerHTML = '<div class="empty">No users found.</div>'; return; }
+    let rows = '';
+    names.forEach(u => {
+      const count = tripMap[u].length;
+      rows += `<tr>
+        <td>${u}</td>
+        <td class="mono">${count} trip${count !== 1 ? 's' : ''}</td>
+        <td style="display:flex;gap:6px;">
+          <button class="btn secondary sm" data-edit="${u}">Edit name</button>
+          <button class="btn ghost" data-del="${u}">Delete</button>
+        </td>
+      </tr>`;
+    });
+    wrap.innerHTML = `<table class="log"><thead><tr><th>Name</th><th>Trips</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table>`;
+    wrap.querySelectorAll('button[data-edit]').forEach(btn =>
+      btn.addEventListener('click', () => openEditModal(btn.dataset.edit))
+    );
+    wrap.querySelectorAll('button[data-del]').forEach(btn =>
+      btn.addEventListener('click', () => adminDeleteUser(btn.dataset.del))
+    );
+  } catch(e) {
+    wrap.innerHTML = '<div class="empty">Failed to load: ' + e.message + '</div>';
+  }
+}
+
+let editingUser = null;
+function openEditModal(username) {
+  editingUser = username;
+  $('edit-name-input').value = username;
+  $('edit-modal-err').style.display = 'none';
+  $('edit-modal').classList.add('open');
+  setTimeout(() => $('edit-name-input').focus(), 50);
+}
+$('edit-modal-cancel').addEventListener('click', () => $('edit-modal').classList.remove('open'));
+$('edit-modal').addEventListener('click', e => { if (e.target === $('edit-modal')) $('edit-modal').classList.remove('open'); });
+$('edit-modal-submit').addEventListener('click', async () => {
+  const newName = $('edit-name-input').value.trim();
+  if (!newName) { $('edit-modal-err').textContent = 'Name cannot be empty.'; $('edit-modal-err').style.display = 'block'; return; }
+  if (newName === editingUser) { $('edit-modal').classList.remove('open'); return; }
+  $('edit-modal-submit').disabled = true;
+  try {
+    const snap = await db.collection('fuel_trips').where('employee', '==', editingUser).get();
+    const batch = db.batch();
+    snap.docs.forEach(d => batch.update(d.ref, { employee: newName }));
+    await batch.commit();
+    $('edit-modal').classList.remove('open');
+    loadAdminUsers();
+  } catch(e) {
+    $('edit-modal-err').textContent = 'Failed: ' + e.message;
+    $('edit-modal-err').style.display = 'block';
+  } finally {
+    $('edit-modal-submit').disabled = false;
+  }
+});
+$('edit-name-input').addEventListener('keydown', e => { if (e.key === 'Enter') $('edit-modal-submit').click(); });
+
+async function adminDeleteUser(username) {
+  if (!confirm(`Delete "${username}" and ALL their trips? This cannot be undone.`)) return;
+  try {
+    const snap = await db.collection('fuel_trips').where('employee', '==', username).get();
+    const batch = db.batch();
+    snap.docs.forEach(d => batch.delete(d.ref));
+    await batch.commit();
+    loadAdminUsers();
+  } catch(e) {
+    alert('Delete failed: ' + e.message);
+  }
+}
 
 // ---- Map setup ----
 let map, directLayer, lrmControl;
