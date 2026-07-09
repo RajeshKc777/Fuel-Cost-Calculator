@@ -276,6 +276,7 @@ function orsRouter() {
       if (controller) controller.abort();
       controller = new AbortController();
       const signal = controller.signal;
+      const ctx = this; // capture LRM control context — callback must be called with this=ctx
       const coords = waypoints.map(wp => [wp.latLng.lng, wp.latLng.lat]);
       fetch('https://api.openrouteservice.org/v2/directions/driving-car/geojson', {
         method: 'POST',
@@ -285,11 +286,11 @@ function orsRouter() {
       })
       .then(r => r.json())
       .then(data => {
-        if (!data.features || !data.features.length) { callback(new Error('No route')); return; }
+        if (!data.features || !data.features.length) { callback.call(ctx, new Error('No route')); return; }
         const f = data.features[0];
         const km = f.properties.summary.distance / 1000;
         const latlngs = f.geometry.coordinates.map(c => L.latLng(c[1], c[0]));
-        callback(null, [{
+        callback.call(ctx, null, [{
           name: '',
           summary: { totalDistance: km * 1000, totalTime: f.properties.summary.duration },
           coordinates: latlngs,
@@ -300,7 +301,7 @@ function orsRouter() {
       })
       .catch(e => {
         if (e.name === 'AbortError') return; // silently ignore cancelled requests
-        callback(e);
+        callback.call(ctx, e);
       });
     },
     abort: function() {
