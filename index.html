@@ -417,7 +417,8 @@ async function fetchViaWaypoint(a, b, offsetKm, side) {
   if (!data.features || !data.features.length) return null;
   return {
     km: data.features[0].properties.summary.distance / 1000,
-    coords: data.features[0].geometry.coordinates.map(c => [c[1], c[0]])
+    coords: data.features[0].geometry.coordinates.map(c => [c[1], c[0]]),
+    via: via
   };
 }
 
@@ -456,10 +457,7 @@ async function resolveMarginRoute(directKm, marginPct) {
   if (directLayer) map.removeLayer(directLayer);
   directLayer = L.polyline(directRoute.coords, { color: '#aaa', weight: 3, dashArray: '5,5', interactive: false }).addTo(map);
 
-  // Set up LRM with best route waypoints as starting point (draggable green)
-  // Use midpoint via-waypoints from best.coords to seed the LRM route
-  const mid = best.coords[Math.floor(best.coords.length / 2)];
-  const viaWp = best.km !== directRoute.km ? [L.latLng(mid[0], mid[1])] : [];
+  const viaWp = best.via ? [L.latLng(best.via.lat, best.via.lon)] : [];
   setupLRM(a, b, viaWp);
 
   return best.km;
