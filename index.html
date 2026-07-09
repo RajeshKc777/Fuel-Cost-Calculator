@@ -328,11 +328,10 @@ function setupLRM(a, b, viaWp) {
     fitSelectedRoutes: true,
     show: false,
     lineOptions: { styles: [{ color: '#2e7d32', weight: 4 }] },
-    // BUG 1 FIX: correct icon assignment — from=first, to=last, plain marker for any via-points in between
-    createMarker: function(i, wp) {
-      if (i === 0)       return L.marker(wp.latLng, { icon: iconFrom, draggable: true });
-      if (i === lastIdx) return L.marker(wp.latLng, { icon: iconTo,   draggable: true });
-      return L.marker(wp.latLng, { draggable: true }); // plain default marker for via-points
+    createMarker: function(i, wp, n) {
+      if (i === 0)     return L.marker(wp.latLng, { icon: iconFrom, draggable: true });
+      if (i === n - 1) return L.marker(wp.latLng, { icon: iconTo,   draggable: true });
+      return L.marker(wp.latLng, { draggable: true });
     }
   }).addTo(map);
 
@@ -397,14 +396,17 @@ async function fetchAllRoutes(a, b) {
   }));
 }
 
-// Route via a perpendicular waypoint offset
-async function fetchViaWaypoint(a, b, offsetKm) {
+// Route via a perpendicular waypoint offset — side: 1 or -1 for both directions
+async function fetchViaWaypoint(a, b, offsetKm, side) {
   const midLat = (a.lat + b.lat) / 2;
   const midLon = (a.lon + b.lon) / 2;
   const dLat = b.lat - a.lat, dLon = b.lon - a.lon;
   const len = Math.sqrt(dLat * dLat + dLon * dLon) || 1;
   const degPerKm = 1 / 111;
-  const via = { lon: midLon + (-dLat / len) * offsetKm * degPerKm, lat: midLat + (dLon / len) * offsetKm * degPerKm };
+  const via = {
+    lon: midLon + side * (-dLat / len) * offsetKm * degPerKm,
+    lat: midLat + side * (dLon  / len) * offsetKm * degPerKm
+  };
   const res = await fetch('https://api.openrouteservice.org/v2/directions/driving-car/geojson', {
     method: 'POST',
     headers: { 'Authorization': ORS_KEY, 'Content-Type': 'application/json' },
@@ -441,7 +443,12 @@ async function resolveMarginRoute(directKm, marginPct) {
     best = pickBestRoute(within, targetKm);
   } else {
     const offsets = [0.5, 1, 1.5, 2];
-    const viaResults = (await Promise.all(offsets.map(o => fetchViaWaypoint(a, b, o).catch(() => null)))).filter(Boolean);
+    const attempts = offsets.flatMap(o => [
+      fetchViaWaypoint(a, b, o,  1).catch(() => null),
+      fetchViaWaypoint(a, b, o, -1).catch(() => null)
+    ]);
+    const viaResults = (await Promise.all(attempts)).filter(Boolean);
+    if (!viaResults.length) console.warn('All via-waypoint attempts failed for margin route; falling back to direct route.');
     best = pickBestRoute([...allRoutes, ...viaResults], targetKm);
   }
 
