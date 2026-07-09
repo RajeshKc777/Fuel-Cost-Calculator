@@ -312,11 +312,15 @@ function showMarkersOnMap(coordsA, coordsB) {
   map.fitBounds([[coordsA.lat, coordsA.lon],[coordsB.lat, coordsB.lon]], { padding: [40,40] });
 }
 
-function setupLRM(a, b, initialCoords) {
+function setupLRM(a, b, viaWp) {
   if (lrmControl) map.removeControl(lrmControl);
 
+  // BUG 1 FIX: include viaWp between start and end so LRM actually routes through the margin waypoint
+  const totalWaypoints = [ L.latLng(a.lat, a.lon), ...(viaWp || []), L.latLng(b.lat, b.lon) ];
+  const lastIdx = totalWaypoints.length - 1;
+
   lrmControl = L.Routing.control({
-    waypoints: [ L.latLng(a.lat, a.lon), L.latLng(b.lat, b.lon) ],
+    waypoints: totalWaypoints,
     router: orsRouter(),
     draggableWaypoints: true,
     addWaypoints: true,
@@ -324,8 +328,11 @@ function setupLRM(a, b, initialCoords) {
     fitSelectedRoutes: true,
     show: false,
     lineOptions: { styles: [{ color: '#2e7d32', weight: 4 }] },
+    // BUG 1 FIX: correct icon assignment — from=first, to=last, plain marker for any via-points in between
     createMarker: function(i, wp) {
-      return L.marker(wp.latLng, { icon: i === 0 ? iconFrom : iconTo, draggable: true });
+      if (i === 0)       return L.marker(wp.latLng, { icon: iconFrom, draggable: true });
+      if (i === lastIdx) return L.marker(wp.latLng, { icon: iconTo,   draggable: true });
+      return L.marker(wp.latLng, { draggable: true }); // plain default marker for via-points
     }
   }).addTo(map);
 
@@ -339,6 +346,11 @@ function setupLRM(a, b, initialCoords) {
     $('claimed-km').textContent = fmt(km) + ' km';
     $('fuel-cost').textContent = 'Rs ' + fmt(fuelCost, 2);
     setStatus('Route updated: ' + fmt(km) + ' km. Save when ready.');
+  });
+
+  // BUG 2 FIX: surface ORS routing errors to the user instead of silently failing
+  lrmControl.on('routingerror', function(e) {
+    setStatus('Route drawing failed: ' + (e.error && e.error.message ? e.error.message : 'unknown error'), true);
   });
 }
 
