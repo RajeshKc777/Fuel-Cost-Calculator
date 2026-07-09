@@ -269,13 +269,19 @@ const iconTo   = L.divIcon({ className: '', html: '<div style="width:14px;height
 
 // ORS router for LRM
 function orsRouter() {
+  let controller = null;
   return {
     route: function(waypoints, callback) {
+      // Cancel any in-flight request before starting a new one
+      if (controller) controller.abort();
+      controller = new AbortController();
+      const signal = controller.signal;
       const coords = waypoints.map(wp => [wp.latLng.lng, wp.latLng.lat]);
       fetch('https://api.openrouteservice.org/v2/directions/driving-car/geojson', {
         method: 'POST',
         headers: { 'Authorization': ORS_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ coordinates: coords })
+        body: JSON.stringify({ coordinates: coords }),
+        signal: signal
       })
       .then(r => r.json())
       .then(data => {
@@ -292,9 +298,14 @@ function orsRouter() {
           instructions: []
         }]);
       })
-      .catch(e => callback(e));
+      .catch(e => {
+        if (e.name === 'AbortError') return; // silently ignore cancelled requests
+        callback(e);
+      });
     },
-    abort: function() {}
+    abort: function() {
+      if (controller) { controller.abort(); controller = null; }
+    }
   };
 }
 
@@ -303,24 +314,10 @@ function initMap() {
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '© OpenStreetMap contributors', maxZoom: 18
   }).addTo(map);
-}
 
-function placeMarker() {} // markers now handled by LRM waypoint icons
-
-function showMarkersOnMap(coordsA, coordsB) {
-  // just pan — LRM control will place its own draggable markers
-  map.fitBounds([[coordsA.lat, coordsA.lon],[coordsB.lat, coordsB.lon]], { padding: [40,40] });
-}
-
-function setupLRM(a, b, viaWp) {
-  if (lrmControl) map.removeControl(lrmControl);
-
-  // BUG 1 FIX: include viaWp between start and end so LRM actually routes through the margin waypoint
-  const totalWaypoints = [ L.latLng(a.lat, a.lon), ...(viaWp || []), L.latLng(b.lat, b.lon) ];
-  const lastIdx = totalWaypoints.length - 1;
-
+  // Create LRM control ONCE here — never destroyed/recreated
   lrmControl = L.Routing.control({
-    waypoints: totalWaypoints,
+    waypoints: [],
     router: orsRouter(),
     draggableWaypoints: true,
     addWaypoints: true,
@@ -339,18 +336,29 @@ function setupLRM(a, b, viaWp) {
     const km = e.routes[0].summary.totalDistance / 1000;
     if (!currentCalc) return;
     const rate = parseFloat($('rate').value) || 0;
-    const fuelCost = km * rate;
     currentCalc.claimedKm = km;
-    currentCalc.fuelCost = fuelCost;
+    currentCalc.fuelCost = km * rate;
     $('claimed-km').textContent = fmt(km) + ' km';
-    $('fuel-cost').textContent = 'Rs ' + fmt(fuelCost, 2);
+    $('fuel-cost').textContent = 'Rs ' + fmt(km * rate, 2);
     setStatus('Route updated: ' + fmt(km) + ' km. Save when ready.');
   });
 
-  // BUG 2 FIX: surface ORS routing errors to the user instead of silently failing
   lrmControl.on('routingerror', function(e) {
     setStatus('Route drawing failed: ' + (e.error && e.error.message ? e.error.message : 'unknown error'), true);
   });
+}
+
+function placeMarker() {} // markers now handled by LRM waypoint icons
+
+function showMarkersOnMap(coordsA, coordsB) {
+  // just pan — LRM control will place its own draggable markers
+  map.fitBounds([[coordsA.lat, coordsA.lon],[coordsB.lat, coordsB.lon]], { padding: [40,40] });
+}
+
+function setupLRM(a, b, viaWp) {
+  // Update waypoints on the single persistent control — never destroy/recreate
+  const waypoints = [ L.latLng(a.lat, a.lon), ...(viaWp || []), L.latLng(b.lat, b.lon) ];
+  lrmControl.setWaypoints(waypoints);
 }
 
 // ---- ORS config ----
