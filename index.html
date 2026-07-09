@@ -32,6 +32,7 @@
   #name-gate p { color: #6b7565; font-size: 13px; margin: 0 0 20px; }
   #name-gate input { width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 4px; font-size: 15px; margin-bottom: 12px; }
   #name-gate input:focus { outline: none; border-color: var(--deep); }
+  #name-gate .gate-err { color: var(--red); font-size: 12px; margin: -8px 0 10px; display: none; }
 
   /* Main layout */
   #app { display: none; }
@@ -113,6 +114,7 @@
     <h2>Who are you?</h2>
     <p>Enter your name to view and manage your own trips only.</p>
     <input type="text" id="name-input" placeholder="e.g. Rajesh" autocomplete="name">
+    <p class="gate-err" id="name-err">This name is already taken, please choose another.</p>
     <button class="btn" id="name-btn">Continue</button>
   </div>
 
@@ -243,14 +245,26 @@ function showApp() {
 
 if (currentUser) showApp();
 
-$('name-btn').addEventListener('click', () => {
+$('name-btn').addEventListener('click', async () => {
   const name = $('name-input').value.trim();
   if (!name) return;
+  const errEl = $('name-err');
+  errEl.style.display = 'none';
+  // Check if name already used by another user in Firestore (case-insensitive)
+  try {
+    const snap = await db.collection('fuel_trips').get();
+    const usedNames = new Set(snap.docs.map(d => (d.data().employee || '').trim().toLowerCase()));
+    if (usedNames.has(name.toLowerCase())) {
+      errEl.style.display = 'block';
+      return;
+    }
+  } catch(e) { /* network error — allow through */ }
   currentUser = name;
   localStorage.setItem('fuelUser', name);
   showApp();
 });
 $('name-input').addEventListener('keydown', e => { if (e.key === 'Enter') $('name-btn').click(); });
+$('name-input').addEventListener('input', () => { $('name-err').style.display = 'none'; });
 
 $('switch-btn').addEventListener('click', () => {
   localStorage.removeItem('fuelUser');
@@ -325,7 +339,7 @@ function initMap() {
     routeWhileDragging: false,
     fitSelectedRoutes: true,
     show: false,
-    lineOptions: { styles: [{ color: '#2e7d32', weight: 4 }] },
+    lineOptions: { styles: [{ color: '#00A651', weight: 5 }] },
     createMarker: function(i, wp, n) {
       if (i === 0)     return L.marker(wp.latLng, { icon: iconFrom, draggable: true });
       if (i === n - 1) return L.marker(wp.latLng, { icon: iconTo,   draggable: true });
@@ -465,6 +479,10 @@ async function resolveMarginRoute(directKm, marginPct) {
   // Draw direct route in gray (static, undraggable)
   if (directLayer) map.removeLayer(directLayer);
   directLayer = L.polyline(directRoute.coords, { color: '#aaa', weight: 3, dashArray: '5,5', interactive: false }).addTo(map);
+
+  // Draw claimed route as a solid green polyline so it visually updates on every margin change
+  if (window.claimedLayer) map.removeLayer(window.claimedLayer);
+  window.claimedLayer = L.polyline(best.coords, { color: '#00A651', weight: 5, interactive: false }).addTo(map);
 
   const viaWp = best.via ? [L.latLng(best.via.lat, best.via.lon)] : [];
   setupLRM(a, b, viaWp);
